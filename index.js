@@ -76,6 +76,8 @@ var defer = typeof setImmediate === 'function'
  * @param {Boolean} [options.proxy]
  * @param {Boolean} [options.resave] Resave unmodified sessions back to the store
  * @param {Boolean} [options.rolling] Enable/disable rolling session expiration
+ * @param {Function} [options.resetIf] Enable reset of the session cookie
+ * @param {String}  [options.resetName] Name of the session cookie in case of reset
  * @param {Boolean} [options.saveUninitialized] Save uninitialized sessions to the store
  * @param {String|Array} [options.secret] Secret for signing session ID
  * @param {Object} [options.store=MemoryStore] Session store
@@ -108,6 +110,12 @@ function session(options) {
   // get the rolling session option
   var rollingSessions = Boolean(opts.rolling)
 
+  // get the reset cookie option
+  var resetCookie = opts.resetIf || function () { return false; }
+
+  // get the reset name option
+  var resetName = opts.resetName || name;
+
   // get the save uninitialized session option
   var saveUninitializedSession = opts.saveUninitialized
 
@@ -116,6 +124,10 @@ function session(options) {
 
   if (typeof generateId !== 'function') {
     throw new TypeError('genid option must be a function');
+  }
+
+  if (typeof resetCookie !== 'function') {
+    throw new TypeError('resetIf option must be a function');
   }
 
   if (resaveSession === undefined) {
@@ -214,7 +226,12 @@ function session(options) {
     req.sessionStore = store;
 
     // get the session ID from the cookie
-    var cookieId = req.sessionID = getcookie(req, name, secrets);
+    var cookieId = getcookie(req, resetName, secrets);
+    if (!cookieId) {
+      cookieId = req.sessionID = getcookie(req, name, secrets);
+    } else {
+      req.sessionId = cookieId
+    }
 
     // set-cookie
     onHeaders(res, function(){
@@ -223,7 +240,9 @@ function session(options) {
         return;
       }
 
-      if (!shouldSetCookie(req)) {
+      var shouldReset = resetCookie(req.session.cookie, cookieOptions);
+
+      if (!shouldSetCookie(req, shouldReset)) {
         return;
       }
 
@@ -239,8 +258,21 @@ function session(options) {
         touched = true
       }
 
-      // set cookie
-      setcookie(res, name, req.sessionID, secrets[0], req.session.cookie.data);
+      if (shouldReset) {
+        var newCookieOptions = Object.assign(
+          {},
+          req.session.cookie.data,
+          (new Cookie(cookieOptions)).data
+        );
+
+        // set new cookie
+        debug('resetting a session cookie');
+        setcookie(res, resetName, req.sessionID, secrets[0], newCookieOptions);
+      } else {
+        // set cookie
+        debug('setting a session cookie');
+        setcookie(res, name, req.sessionID, secrets[0], req.session.cookie.data);
+      }
     });
 
     // proxy end() to commit the session
@@ -461,7 +493,7 @@ function session(options) {
     }
 
     // determine if cookie should be set on response
-    function shouldSetCookie(req) {
+    function shouldSetCookie(req, forceReset = false) {
       // cannot set cookie without a session ID
       if (typeof req.sessionID !== 'string') {
         return false;
@@ -469,7 +501,7 @@ function session(options) {
 
       return cookieId !== req.sessionID
         ? saveUninitializedSession || isModified(req.session)
-        : rollingSessions || req.session.cookie.expires != null && isModified(req.session);
+        : forceReset || rollingSessions || req.session.cookie.expires != null && isModified(req.session);
     }
 
     // generate a session if the browser doesn't send a sessionID

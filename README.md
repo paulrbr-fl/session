@@ -247,6 +247,24 @@ set to `false`, the cookie will not be set on a response with an uninitialized
 session. This option only modifies the behavior when an existing session was
 loaded for the request.
 
+##### resetIf
+
+Force the session identifier cookie to be reset with a conditional function. The
+cookie name will be the configured `name` or the extra `resetName` option. Your
+function needs to return `true` when you want to activate this feature.
+
+The function will receive as first input parameter an object containing all
+parameters from the current session cookie (the ones initially defined by the
+[`cookie`](#cookie)) and a second input parameter containing the new cookie options
+(the ones defined by the [`cookie`](#cookie) option).
+
+The default value is a function returning `false`.
+
+###### resetName
+
+This is an optional option which will be used when `resetIf` function returns
+true.
+
 ##### saveUninitialized
 
 Forces a session that is "uninitialized" to be saved to the store. A session is
